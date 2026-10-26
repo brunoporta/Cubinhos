@@ -54,7 +54,8 @@ jobs:
           base = Path('projeto')
           manifest = base / 'android/app/src/main/AndroidManifest.xml'
           source = manifest.read_text()
-          source, count = re.subn(r'<activity\\b', '<activity android:screenOrientation="portrait"', source, count=1)
+          count = source.count('<activity')
+          source = source.replace('<activity', '<activity android:screenOrientation="portrait"', 1)
           if count != 1:
               raise RuntimeError('Activity nao encontrada')
           manifest.write_text(source)
