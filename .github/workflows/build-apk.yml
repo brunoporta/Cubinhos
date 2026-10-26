@@ -1,0 +1,57 @@
+name: Compilar APK Cubinhos
+on:
+  push:
+    branches: [main]
+    paths:
+      - cubinhos.zip
+      - .github/workflows/build-apk.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extrair projeto original
+        run: |
+          test -f cubinhos.zip || (echo "Adicione cubinhos.zip na raiz do repositorio" && exit 1)
+          unzip -oq cubinhos.zip -d projeto
+          test -f projeto/package.json
+          test -f projeto/www/index.html
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: projeto/package-lock.json
+        continue-on-error: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Preparar Android e instalar dependencias
+        working-directory: projeto
+        run: |
+          npm install --no-audit --no-fund
+          npx cap add android
+          npx cap sync android
+      - name: Ajustar orientacao para retrato
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('projeto/android/app/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          s=s.replace('<activity\n', '<activity\n            android:screenOrientation="portrait"\n', 1)
+          p.write_text(s)
+          PY
+      - name: Compilar e assinar APK debug
+        working-directory: projeto/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cubinhos-APK
+          path: projeto/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
