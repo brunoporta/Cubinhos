@@ -3,54 +3,77 @@ on:
   push:
     branches: [main]
     paths:
-      - cubinhos.zip
-      - .github/workflows/build-apk.yml
+      - 'cubinhos.zip'
+      - '.github/workflows/build-apk.yml'
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Extrair projeto original
+
+      - name: Extrair o projeto original
         run: |
-          test -f cubinhos.zip || (echo "Adicione cubinhos.zip na raiz do repositorio" && exit 1)
+          test -f cubinhos.zip
+          mkdir -p projeto
           unzip -oq cubinhos.zip -d projeto
           test -f projeto/package.json
           test -f projeto/www/index.html
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: npm
-          cache-dependency-path: projeto/package-lock.json
-        continue-on-error: true
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Preparar Android e instalar dependencias
+
+      - name: Verificar Android SDK pre-instalado
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -d "$ANDROID_HOME/platform-tools"
+          ls -1 "$ANDROID_HOME/platforms" | tail -10
+
+      - name: Preparar projeto Android
         working-directory: projeto
         run: |
           npm install --no-audit --no-fund
           npx cap add android
           npx cap sync android
-      - name: Ajustar orientacao para retrato
+
+      - name: Configurar orientacao e icone
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('projeto/android/app/src/main/AndroidManifest.xml')
-          s=p.read_text()
-          s=s.replace('<activity\n', '<activity\n            android:screenOrientation="portrait"\n', 1)
-          p.write_text(s)
+          import re
+          base = Path('projeto')
+          manifest = base / 'android/app/src/main/AndroidManifest.xml'
+          source = manifest.read_text()
+          source, count = re.subn(r'<activity\\b', '<activity android:screenOrientation="portrait"', source, count=1)
+          if count != 1:
+              raise RuntimeError('Activity nao encontrada')
+          manifest.write_text(source)
+          icon = (base / 'www/icons/icon-512.png').read_bytes()
+          for density in ['mdpi','hdpi','xhdpi','xxhdpi','xxxhdpi']:
+              p = base / f'android/app/src/main/res/mipmap-{density}'
+              if p.is_dir():
+                  for name in ['ic_launcher.png','ic_launcher_round.png','ic_launcher_foreground.png']:
+                      (p/name).write_bytes(icon)
           PY
-      - name: Compilar e assinar APK debug
+
+      - name: Compilar APK assinado para instalacao
         working-directory: projeto/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
-      - uses: actions/upload-artifact@v4
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Publicar o APK
+        uses: actions/upload-artifact@v4
         with:
           name: Cubinhos-APK
           path: projeto/android/app/build/outputs/apk/debug/app-debug.apk
